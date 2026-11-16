@@ -100,6 +100,16 @@ Settings in `.orch/config.json` (change with `orch.py setup --<flag>`): `test_cm
 (how many at once, default 3), `load` (pause launching above this load average),
 `gate_timeout_min`, `review` (on/off), `worktree_dir` (default `../<repo>-orch-wt/`).
 
+## Skills
+
+`/lean-claude-md` makes an always-loaded instruction file (a global or project
+CLAUDE.md, AGENTS.md) leaner: it measures the file, audits every rule as keep,
+compress, move or cut, and writes a `-lean` copy beside it. It never edits the
+original; the swap is yours, on your go-ahead. It can trial the lean copy
+against the original in headless sessions first (`skills/lean-claude-md/trial.sh`,
+probes in `example-probes.tsv`). A trial costs one headless session plus one
+Haiku call per probe, twice with `--control`.
+
 ## Things to know
 
 - **Permissions.** An unattended run stops at every permission prompt. Start
@@ -123,6 +133,8 @@ Settings in `.orch/config.json` (change with `orch.py setup --<flag>`): `test_cm
 ```
 python3 -m unittest discover -s tests
 ```
+
+The lean-claude-md trial suite runs under it and needs `bash` and `jq` (skipped without them).
 
 ## License
 
