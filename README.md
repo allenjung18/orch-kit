@@ -17,7 +17,7 @@ No memory system, no project-specific setup, no services. One Python script
 ## Install
 
 ```
-/plugin marketplace add <path-or-git-url-of-this-repo>
+/plugin marketplace add allenjung18/orch-kit
 /plugin install orch-kit@orch-kit
 ```
 
