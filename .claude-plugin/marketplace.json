@@ -1,0 +1,13 @@
+{
+  "name": "orch-kit",
+  "owner": {
+    "name": "orch-kit"
+  },
+  "plugins": [
+    {
+      "name": "orch-kit",
+      "source": "./",
+      "description": "Plan, build in worktrees, review and land: /orch-setup, /orch and the unattended /orch-auto."
+    }
+  ]
+}
