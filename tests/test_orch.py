@@ -240,6 +240,25 @@ class ReportTest(Repo):
             self.ok("prepare", "C-1")
             self.assertIn("REQUEUED", self.report("C-1", "PARTIAL", remaining="half").stdout)
 
+    def test_a_chunk_that_needed_no_change_closes_without_landing(self):
+        self.ok("init")
+        self.ok("add", "--kind", "chunk", "--text", "one")
+        v = self.values(self.ok("prepare", "C-1"))
+        body = REPORT.format(id="C-1", result="DONE", branch=v["BRANCH"], decision="none",
+                             remaining="already done").replace("SHAS: abc123", "SHAS: none")
+        self.assertIn("nothing to land", self.report("C-1", text=body).stdout)
+        self.assertEqual(self.item("C-1")["status"], "done")
+        self.assertFalse(os.path.exists(v["WORKTREE"]))
+
+    def test_shas_none_with_commits_on_the_branch_still_lands(self):
+        self.ok("init")
+        self.ok("add", "--kind", "chunk", "--text", "one")
+        v = self.build("C-1")
+        body = REPORT.format(id="C-1", result="DONE", branch=v["BRANCH"], decision="none",
+                             remaining="none").replace("SHAS: abc123", "SHAS: none")
+        self.assertIn("now: orch.py land C-1", self.report("C-1", text=body).stdout)
+        self.assertTrue(os.path.isdir(v["WORKTREE"]))
+
     def test_blocked_without_a_decision_fails(self):
         self.ok("init")
         self.ok("add", "--kind", "chunk", "--text", "one")
@@ -355,6 +374,18 @@ class LandTest(Repo):
                 remote_sha = sh("git --git-dir=%s rev-parse main" % remote, self.root).strip()
                 self.assertEqual(remote_sha == self.base_sha(), pushed)
                 self.ok("add", "--kind", "chunk", "--text", "next %s" % words)
+
+
+class LandCleanupTest(Repo):
+    test_cmd = "touch artifact.out && test ! -e FAIL"
+
+    def test_land_removes_the_worktree_even_when_the_gate_left_untracked_files(self):
+        self.ok("init")
+        self.ok("add", "--kind", "chunk", "--text", "one")
+        v = self.build("C-1")
+        self.ok("land", "C-1")
+        self.assertFalse(os.path.exists(v["WORKTREE"]))
+        self.assertEqual(sh("git branch --list 'orch/*'", self.root).strip(), "")
 
 
 class PlanTest(Repo):

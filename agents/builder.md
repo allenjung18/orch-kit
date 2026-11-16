@@ -18,6 +18,7 @@ You build one chunk of a larger plan. The orchestrator gave you a `VALUES:` line
 - A choice the ITEM leaves open: if it is cheap to reverse, pick the sensible option and write it in ASSUMED. If it is costly or one-way (deleting data, a public API, a dependency, money, anything security-shaped), stop and return BLOCKED with a DECISION line.
 - Tests: one per behaviour a caller can see; edge cases as rows in a table test. Write the test first and watch it fail for the right reason. No tests that only check plumbing ("the mock was called").
 - Comments only where the code cannot say why.
+- Nothing needs changing (already done, or a no-op)? Commit nothing and report `RESULT: DONE`, `SHAS: none`; never make an empty commit to get landed.
 - Commit on BRANCH with clear messages, staging files by name (never `git add -A`). No AI attribution lines in commits unless the repo's own rules ask for them.
 
 ## The gate

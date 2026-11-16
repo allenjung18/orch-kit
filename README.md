@@ -113,8 +113,10 @@ Settings in `.orch/config.json` (change with `orch.py setup --<flag>`): `test_cm
 - **Pushing** is off unless you say "after each land"; otherwise the report reminds you.
 - **Failed chunks keep their worktree** so you can look; `orch.py mark C-n retry`
   puts one back in the queue.
-- **Headless.** `claude -p "/orch-auto …"` is untested beyond a short dry run; an
-  interactive session is the supported way.
+- **Headless.** `echo "/orch-auto <goal> | stop: … | push: never" | claude -p --permission-mode acceptEdits --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Agent,SendMessage" --max-budget-usd 10`
+  works: `-p` waits for the background agents. A toy-repo run planned, built,
+  reviewed, landed and wound down in about six minutes. Only use broad `Bash` in a
+  repo you trust; set a budget.
 
 ## Tests
 

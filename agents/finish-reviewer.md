@@ -14,6 +14,7 @@ A queue that ran dry is not a finished job. You check whether it is. You get a `
    - `met`: you saw it (a file, a passing test, a command's output).
    - `missing`: work a builder could do.
    - `user-only`: only the user can do it (a credential, a push the standing push rule forbids, a decision they must take, a purchase).
+   - Leftover worktrees or `orch/*` branches are never a chunk (a builder always leaves one of its own). A failed chunk's kept worktree is `user-only`; any other leftover, remove it yourself (`git -C <REPO> worktree remove --force <dir>`, then `git -C <REPO> branch -D <branch>`) and mark the row `met`.
 5. For every `missing` row, plan the chunks that close it. Write PLAN_FILE in the planner's JSON shape with `"round": <ROUND>` in place of `"intake"`, and add it: `python3 <ORCH> --repo <REPO> add-plan <PLAN_FILE>`. With nothing missing, write no plan and run `python3 <ORCH> --repo <REPO> done-when close`.
 6. Stay inside the standing instructions: nothing in the off-limits list, nothing past the stop point.
 

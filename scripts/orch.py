@@ -582,6 +582,14 @@ def cmd_report(st, a):
             st.save(run)
             st.log("report %s DONE (read-only)" % x["id"])
             print("REPORT OK %s DONE — read-only, marked done" % x["id"])
+        elif fields["SHAS"] == "none" and nothing_to_land(st, x):
+            git(["worktree", "remove", "--force", x["worktree"]], st.root, check=False)
+            git(["branch", "-D", x["branch"]], st.root, check=False)
+            x.update({"status": "done", "worktree": "", "branch": "",
+                      "note": "nothing to land: " + fields["REMAINING"]})
+            st.save(run)
+            st.log("report %s DONE, nothing to land" % x["id"])
+            print("REPORT OK %s DONE — nothing to land, closed" % x["id"])
         else:
             st.save(run)
             st.log("report %s DONE gate=%s" % (x["id"], fields["GATE"]))
@@ -612,6 +620,16 @@ def cmd_report(st, a):
     st.log("report %s FAILED: %s" % (x["id"], fields["REMAINING"]))
     print("REPORT OK %s FAILED — relay to the user: %s (worktree kept: %s)"
           % (x["id"], fields["REMAINING"], x["worktree"]))
+
+
+def nothing_to_land(st, x):
+    """A builder chunk whose branch holds no commits and whose worktree holds no edits."""
+    cfg = st.config()
+    if not os.path.isdir(x["worktree"]):
+        return False
+    ahead = git(["rev-list", "--count", "%s..HEAD" % cfg["base"]], x["worktree"], check=False).stdout.strip()
+    dirty = git(["status", "--porcelain", "--untracked-files=no"], x["worktree"], check=False).stdout.strip()
+    return ahead == "0" and not dirty
 
 
 def give_up_or_requeue(st, run, x, why, exit_code=4):
@@ -716,8 +734,14 @@ def land_steps(st, cfg, x, wt, br, base, root):
     else:
         git(["update-ref", "refs/heads/" + base, new_head, old_base], root)
     shas = git(["log", "--format=%h", "%s..%s" % (old_base, new_head)], root).stdout.split()
-    git(["worktree", "remove", wt], root, check=False)
-    git(["branch", "-D", br], root, check=False)
+    # --force: tracked files are clean (checked above); what is left is the gate's own
+    # untracked output (__pycache__, build dirs), which must not strand the worktree.
+    rm = git(["worktree", "remove", "--force", wt], root, check=False)
+    if rm.returncode == 0:
+        git(["branch", "-D", br], root, check=False)
+    else:
+        st.log("land %s: worktree %s not removed: %s" % (x["id"], wt, rm.stderr.strip()))
+        print("WORKTREE LEFT %s (remove it by hand): %s" % (wt, rm.stderr.strip()))
     run = st.load()
     y = find(run, x["id"])
     y.update({"status": "done", "shas": shas, "note": "landed", "worktree": "", "branch": ""})
