@@ -5,6 +5,7 @@ commands do, and asserts on its printed verdicts, exit codes and git state.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -503,6 +504,107 @@ class AutoTest(Repo):
         owed = out.split("## Only you can do")[1]
         self.assertIn("D-1 pick → (a) — delegated", decided)
         self.assertIn("decide D-2: ship?", owed)
+        self.assertIn("/orch-retro", out.split("## Suggested follow-ups")[1])
+
+
+MISS = "report-miss %s attempt 1: missing GATE"
+
+
+class RetroTest(Repo):
+    """orch.py retro on a hand-written sample run: run.json plus ledger lines "HH:MM text"."""
+
+    def sample(self, lines, history=(), items=(), decisions=()):
+        """Write the run and its ledger; return the ledger line number of lines[0]."""
+        run = {"created": "2026-01-01T09:00:00", "decisions": list(decisions),
+               "items": [dict({"kind": "chunk", "assumed": "", "est": None, "read_only": False}, **x) for x in items]}
+        with open(os.path.join(self.root, ".orch", "run.json"), "w") as f:
+            json.dump(run, f)
+        rows = (["08:00 init mode=attended"] + list(history) if history else []) + ["09:00 init mode=attended"] + list(lines)
+        with open(os.path.join(self.root, ".orch", "ledger.log"), "w") as f:
+            f.write("".join("2026-01-01T%s:00  %s\n" % (r[:5], r[6:]) for r in rows))
+        return len(rows) - len(lines) + 1
+
+    def retro_file(self):
+        return os.path.join(self.root, ".orch", "retro.md")
+
+    def test_a_report_miss_seen_in_an_earlier_run_names_the_chunk_and_its_ledger_line(self):
+        first = self.sample(["09:05 prepare C-2 attempt 1 worktree /w", "09:06 " + MISS % "C-2", "09:07 land C-2 LANDED abc"],
+                            history=["08:01 " + MISS % "C-1", "08:02 land C-1 LANDED abc"])
+        out = self.ok("retro")
+        with open(self.retro_file()) as f:
+            text = f.read()
+        self.assertRegex(out, r"\nRETRO \S+/\.orch/retro\.md\n")
+        self.assertEqual(re.findall(r"^## R-\d+  add  (\S+)$", text, re.M), ["agents/builder.md"])
+        self.assertIn("evidence: ledger line %d (1 this run) · report-miss missing-gate: 2 of 2 runs" % (first + 1), text)
+        self.assertIn("chunks: C-2\n", text)
+
+    def test_edges(self):
+        rows = [
+            # name, this run's lines (None: no run.json), history, items, expected targets (None: no findings), also
+            ("no run", None, [], [], "REFUSED", "no run"),
+            ("clean run", ["09:01 prepare C-1 attempt 1 worktree /w", "09:05 report C-1 DONE gate=ok",
+                           "09:06 land C-1 LANDED abc"], [], [], None, ""),
+            ("one report-miss, no earlier run", ["09:01 " + MISS % "C-1"], [], [], None, ""),
+            ("two RESULT misses differ only in the quoted value",
+             ["09:01 report-miss C-1 attempt 1: RESULT is 'PASS', not one of DONE|FAILED",
+              "09:02 report-miss C-2 attempt 1: RESULT is 'OK', not one of DONE|FAILED"], [], [],
+             ["agents/builder.md"], "report-miss result-is-not"),
+            ("a red gate and a conflict are different lessons",
+             ["09:01 land C-1 REFUSED: test command exit 1 after rebase (x)",
+              "09:02 land C-2 REFUSED: rebase onto main conflicts"], [], [], None, ""),
+            ("two red-gate refusals",
+             ["09:01 land C-1 REFUSED: test command exit 1 after rebase (x)",
+              "09:09 land C-1 REFUSED (final): test command timed out after rebase (x)"], [], [],
+             ["commands/orch.md"], "run the test command on the rebased branch"),
+            ("a strike then a fail, both no report",
+             ["09:01 C-1 requeued after attempt 1: no report: missing GATE",
+              "09:30 C-1 failed: no progress after 3 attempts: no report: labels out of order"], [], [],
+             ["agents/planner.md"], "retry no-report"),
+            ("two builders report FAILED",
+             ["09:01 report C-1 FAILED: x", "09:02 report C-2 FAILED: y"], [], [],
+             ["agents/planner.md"], "retry builder-failed"),
+            ("two chunks past twice their estimate, timed from the first attempt; one within it",
+             ["09:00 prepare C-1 attempt 1 worktree /w", "09:30 prepare C-1 attempt 2 worktree /w (resumed)",
+              "09:45 report C-1 DONE, nothing to land",
+              "09:50 prepare C-2 attempt 1 worktree /w", "10:40 report C-2 DONE gate=ok",
+              "10:41 land C-2 LANDED b", "10:45 prepare C-3 attempt 1 worktree /w", "11:10 land C-3 LANDED c",
+              "11:15 prepare C-4 attempt 1 worktree /w", "11:55 land C-4 LANDED d"], [],
+             [{"id": "C-1", "est": 10}, {"id": "C-2", "est": 15}, {"id": "C-3", "est": 30}, {"id": "C-4"}],
+             ["agents/planner.md"], ("overrun builder: 1 of 1 runs", "chunks: C-1, C-2\n")),
+            ("overruns under 20 minutes are noise",
+             ["09:00 prepare C-1 attempt 1 worktree /w", "09:15 land C-1 LANDED a",
+              "09:20 prepare C-2 attempt 1 worktree /w", "09:35 land C-2 LANDED b"], [],
+             [{"id": "C-1", "est": 5}, {"id": "C-2", "est": 5}], None, ""),
+            ("a retro note outranks two report-misses; assumed and delegated are listed",
+             ["09:01 " + MISS % "C-1", "09:02 " + MISS % "C-2",
+              "09:03 retro note: agents/reviewer.md should name the test command"], [],
+             [{"id": "C-1", "assumed": "kept the old name"}],
+             ["agents/reviewer.md", "agents/builder.md"],
+             "listed, not proposed: C-1 assumed: kept the old name; D-1 delegated: (a)"),
+            ("six notes are capped at five", ["09:0%d retro note: lesson %d" % (i, i) for i in range(6)], [], [],
+             ["commands/orch.md"] * 5, "lesson 0"),
+        ]
+        for name, lines, history, items, expected, also in rows:
+            with self.subTest(name):
+                with open(self.retro_file(), "w") as f:
+                    f.write("stale\n")
+                if lines is None:  # first row: setUp made a config, never a run
+                    r = self.orch("retro")
+                    self.assertEqual(r.returncode, 2)
+                    self.assertIn("REFUSED: " + also, r.stdout)
+                    continue
+                self.sample(lines, history, items,
+                            [{"id": "D-1", "answer": "(a)", "how": "delegated"}] if "delegated" in also else [])
+                out = self.ok("retro")
+                if expected is None:
+                    self.assertIn("retro: no findings", out)
+                    self.assertFalse(os.path.exists(self.retro_file()))
+                    continue
+                with open(self.retro_file()) as f:
+                    text = f.read()
+                self.assertEqual(re.findall(r"^## R-\d+  add  (\S+)$", text, re.M), expected)
+                for s in ([also] if isinstance(also, str) else also):
+                    self.assertIn(s, text)
 
 
 class ReconcileTest(Repo):

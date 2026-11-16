@@ -91,6 +91,7 @@ you ──/orch──▶ orchestrator (your session: launches, relays, decides; 
 | `/orch-setup` | detect and confirm test command, base branch; write `.orch/config.json` |
 | `/orch [+ kind: text]` | add work and run the loop, or resume it |
 | `/orch-auto <goal>` | the unattended run, ending in a report |
+| `/orch-retro` | after a run: 3–5 proposals for the agents and commands, each citing ledger lines; shows them, applies nothing |
 
 The orchestrator drives `scripts/orch.py`; you can run it yourself to look:
 `python3 scripts/orch.py status --all`, `decisions`, `next`, or `--help` for every verb.

@@ -1,7 +1,7 @@
 {
   "name": "orch-kit",
   "description": "Orchestrate Claude Code agents in any git repo: plan work into chunks, build each in its own worktree with a fresh-context review, land only what passes your tests. Attended (/orch) or unattended (/orch-auto).",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
   "keywords": ["orchestration", "agents", "worktrees", "unattended"]
 }

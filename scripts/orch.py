@@ -978,10 +978,11 @@ def cmd_winddown(st, a):
         owed.append("push %s when you are happy with it (nothing was pushed)" % cfg["base"])
     out.extend("- " + o for o in owed) if owed else out.append("- nothing")
     follow = [n for x in chunks(run) for n in x.get("next", [])]
-    if follow:
-        out.append("")
-        out.append("## Suggested follow-ups (not queued)")
-        out.extend("- " + n for n in follow)
+    follow.append("/orch-retro — what this run's ledger suggests changing in the agents and commands "
+                  "(proposals only, nothing applied)")
+    out.append("")
+    out.append("## Suggested follow-ups (not queued)")
+    out.extend("- " + n for n in follow)
     path = os.path.join(st.dir, "report-%s.md" % now().replace(":", "")[:15])
     with open(path, "w") as f:
         f.write("\n".join(out) + "\n")
@@ -990,6 +991,185 @@ def cmd_winddown(st, a):
     st.log("winddown %s -> %s" % (reason, path))
     print("\n".join(out))
     print("\nREPORT %s" % path)
+
+
+# ---------------------------------------------------------------- retro
+
+LEDGER_LINE = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)  (.*)$")
+RETRO_MAX = 5
+RETRO_TARGETS = {"report-miss": "agents/builder.md", "land-refused": "commands/orch.md",
+                 "retry": "agents/planner.md", "overrun": "agents/planner.md"}
+# "main checkout" before "uncommitted": the user's dirty checkout is not the builder's
+REFUSAL_CLASSES = (("test command", "red-gate"), ("conflicts", "rebase-conflict"),
+                   ("main checkout", "main-checkout-dirty"), ("uncommitted", "dirty-worktree"),
+                   ("no commits", "no-commits"), ("moved during", "base-moved"),
+                   ("is gone", "worktree-gone"), ("not on branch", "wrong-branch"),
+                   ("fast-forward", "fast-forward-refused"))
+REFUSAL_HINTS = {"red-gate": "run the test command on the rebased branch and make it pass before replying",
+                 "rebase-conflict": "rebase onto the base branch and resolve the conflict before replying",
+                 "dirty-worktree": "commit or discard every change in the worktree before replying",
+                 "no-commits": "commit the work on its branch before replying"}
+NAMED_PATH = re.compile(r"\b((?:agents|commands|scripts|skills)/[\w./-]*\w)")
+
+
+def clip(text, n=80):
+    text = " ".join(str(text).split())
+    return text if len(text) <= n else text[:n - 1] + "…"
+
+
+def kebab(text, words=3):
+    text = re.sub(r"'[^']*'|\"[^\"]*\"", " ", text.lower())  # quoted values vary; the lesson does not
+    return "-".join(re.findall(r"[a-z0-9]+", text)[:words]) or "unnamed"
+
+
+def ledger_signal(text):
+    """(signal, signature, chunk, why) for a ledger line the retro counts, else None."""
+    m = re.match(r"retro note: (.+)", text)
+    if m:
+        return "note", kebab(m.group(1), 4), "", m.group(1)
+    m = re.match(r"report-miss (C-\d+) attempt \d+: (.+)", text)
+    if m:
+        return "report-miss", kebab(m.group(2)), m.group(1), m.group(2)
+    m = re.match(r"land (C-\d+) REFUSED(?: \(final\))?: (.+)", text)
+    if m:
+        sig = next((s for k, s in REFUSAL_CLASSES if k in m.group(2)), None) or kebab(m.group(2))
+        return "land-refused", sig, m.group(1), m.group(2)
+    m = re.match(r"(C-\d+) (?:requeued after attempt \d+|failed): (?:no progress after \d+ attempts: )?(.+)", text)
+    if m:
+        return "retry", kebab(m.group(2).split(":")[0]), m.group(1), m.group(2)
+    m = re.match(r"report (C-\d+) FAILED: (.*)", text)
+    if m:
+        return "retry", "builder-failed", m.group(1), m.group(2) or "failed"
+    return None
+
+
+def ledger_runs(path):
+    """The ledger cut at each `init` line into runs of (line number, time, text); the last is this run."""
+    runs = [[]]
+    with open(path) as f:
+        for n, line in enumerate(f, 1):
+            m = LEDGER_LINE.match(line.rstrip("\n"))
+            if not m:
+                continue
+            if m.group(2).startswith("init ") and runs[-1]:
+                runs.append([])
+            runs[-1].append((n, m.group(1), m.group(2)))
+    return runs
+
+
+def retro_finding(key, c):
+    """(target, why, proposal) for one candidate."""
+    kind, sig = key
+    why0, ids = clip(c["whys"][0], 60), ", ".join(c["chunks"])
+    if kind == "note":
+        m = NAMED_PATH.search(c["whys"][0])
+        target = m.group(1) if m else "commands/orch.md"
+        return (target, "the orchestrator noted it during the run",
+                "Add the lesson where it applies in %s: \"%s\"" % (target, clip(c["whys"][0], 200)))
+    target = RETRO_TARGETS[kind]
+    n = len(c["lines"])
+    if kind == "report-miss":
+        return (target, "the queue refused %d report block(s) (%s: '%s'); each cost a resume round-trip" % (n, ids, why0),
+                "Under \"## Finish\", add: \"Before you send, check the 10 lines against the template: every "
+                "label once, in order, CHUNK first and NEXT last, nothing after NEXT.\"")
+    if kind == "land-refused":
+        hint = REFUSAL_HINTS.get(sig, "fix the cause ('%s') before replying" % why0)
+        return (target, "%d land(s) refused as %s (%s); each sends the branch back, and a second refusal "
+                        "fails the chunk" % (n, sig, ids),
+                "In \"## 2. When an agent finishes\", under LAND REFUSED, add: \"On a %s refusal, the SEND text "
+                "also tells the builder to %s.\"" % (sig, hint))
+    if kind == "retry":
+        return (target, "%d attempt(s) ended without landing (%s: '%s'); each relaunch repeats the builder's work"
+                % (n, ids, why0),
+                "Under \"## Shape the work\", add: \"Work that needed more than one attempt (%s) was too big or "
+                "too vague: split it so each chunk fits one attempt and names its proving test.\"" % sig)
+    return (target, "%s ran past twice the estimate, so the plan's sizing was off" % "; ".join(c["whys"]),
+            "Under \"## Shape the work\", add: \"%s chunks ran past twice their est_min (%s): estimate that "
+            "kind at the observed rate, or split it.\"" % (sig, "; ".join(c["whys"])))
+
+
+def cmd_retro(st, a):
+    """Write 3-5 evidence-cited proposals from this run's ledger to .orch/retro.md; apply nothing.
+
+    A signal becomes a finding with 2+ ledger lines this run, the same signature in an earlier
+    run of the ledger, or a `retro note:` line (orch.py log "retro note: ..."). None: no file.
+    """
+    run = st.load()
+    runs = ledger_runs(st.ledger_path)
+    this, earlier = runs[-1], runs[:-1]
+    seen_before = {}
+    for r in earlier:
+        for key in {s[:2] for s in (ledger_signal(t) for _, _, t in r) if s}:
+            seen_before[key] = seen_before.get(key, 0) + 1
+    cands = {}
+
+    def hit(key, n, chunk, why):
+        c = cands.setdefault(key, {"lines": [], "chunks": [], "whys": []})
+        c["lines"].append(n)
+        if chunk and chunk not in c["chunks"]:
+            c["chunks"].append(chunk)
+        c["whys"].append(why)
+
+    starts, ends = {}, {}
+    for n, ts, text in this:
+        s = ledger_signal(text)
+        if s:
+            hit(("note", n) if s[0] == "note" else s[:2], n, s[2], s[3])
+        m = re.match(r"prepare (C-\d+) attempt", text)
+        if m and m.group(1) not in starts:
+            starts[m.group(1)] = (n, ts)
+        m = re.match(r"land (C-\d+) LANDED|report (C-\d+) DONE", text)
+        if m:
+            ends[m.group(1) or m.group(2)] = (n, ts)
+    for x in chunks(run):
+        est, cid = x.get("est"), x["id"]
+        if not isinstance(est, (int, float)) or cid not in starts or cid not in ends:
+            continue
+        took = (dt.datetime.fromisoformat(ends[cid][1]) - dt.datetime.fromisoformat(starts[cid][1])).total_seconds() / 60
+        if took >= 20 and took > 2 * est:
+            hit(("overrun", "read-only" if x.get("read_only") else "builder"), ends[cid][0], cid,
+                "%s est %g min, took %d (from line %d)" % (cid, est, round(took), starts[cid][0]))
+    found = []
+    for key, c in cands.items():
+        c["runs"] = 1 + seen_before.get(key, 0)
+        if key[0] == "note" or len(c["lines"]) >= 2 or c["runs"] >= 2:
+            found.append((key, c))
+    found.sort(key=lambda kc: (kc[0][0] != "note", -kc[1]["runs"] * len(kc[1]["lines"]), kc[1]["lines"][0]))
+    found = found[:RETRO_MAX]
+    path = os.path.join(st.dir, "retro.md")
+    if not found:
+        if os.path.exists(path):
+            os.remove(path)  # a stale report from an earlier run must not read as this run's
+        print("retro: no findings — %d signal line(s) this run, none with 2+ lines, an earlier run "
+              "or a retro note; no file written" % sum(len(c["lines"]) for c in cands.values()))
+        return
+    total = max(1, sum(1 for r in runs if r and r[0][2].startswith("init ")))
+    counts = {}
+    for (kind, _), c in cands.items():
+        counts[kind] = counts.get(kind, 0) + len(c["lines"])
+    listed = ["%s assumed: %s" % (x["id"], clip(x["assumed"])) for x in chunks(run) if x.get("assumed")]
+    listed += ["%s delegated: %s" % (d["id"], clip(d["answer"])) for d in run["decisions"] if d.get("how") == "delegated"]
+    out = ["# orch retro — run %s" % run["created"],
+           "scanned %s · %d chunks · signals: %s · ledger: %d run(s)" % (
+               now(), len(chunks(run)), ", ".join("%s %d" % kv for kv in sorted(counts.items())), total),
+           "listed, not proposed: %s" % ("; ".join(listed) or "none"), ""]
+    for i, (key, c) in enumerate(found, 1):
+        target, why, proposal = retro_finding(key, c)
+        label = "retro note" if key[0] == "note" else "%s %s" % key
+        out += ["## R-%d  add  %s" % (i, target),
+                "evidence: ledger line%s %s (%d this run) · %s: %d of %d runs" % (
+                    "s" if len(c["lines"]) > 1 else "", ", ".join(map(str, c["lines"])), len(c["lines"]),
+                    label, c["runs"], total),
+                "chunks: %s" % (", ".join(c["chunks"]) or "none"),
+                "why: %s" % why,
+                "--- proposed ---",
+                proposal, ""]
+    out.append("RESULT: %d finding(s) · proposals only: nothing was applied" % len(found))
+    with open(path + ".tmp", "w") as f:
+        f.write("\n".join(out) + "\n")
+    os.replace(path + ".tmp", path)
+    print("\n".join(out))
+    print("\nRETRO %s" % path)
 
 
 def cmd_log(st, a):
@@ -1040,6 +1220,7 @@ def main(argv=None):
     p = sub.add_parser("reconcile"); p.set_defaults(fn=cmd_reconcile); p.add_argument("--apply", action="store_true")
     p = sub.add_parser("winddown"); p.set_defaults(fn=cmd_winddown)
     p.add_argument("--reason", required=True); p.add_argument("--note")
+    p = sub.add_parser("retro"); p.set_defaults(fn=cmd_retro)
     p = sub.add_parser("log"); p.set_defaults(fn=cmd_log); p.add_argument("text")
 
     a = ap.parse_args(argv)
