@@ -40,8 +40,8 @@ Once the gate is green:
 CHUNK: <the CHUNK id from VALUES>
 RESULT: DONE | PARTIAL | BLOCKED | FAILED
 BRANCH: <BRANCH, or none for read-only>
-SHAS: <your commit shas, space-separated, or none>
-GATE: <the command, pass/fail/skip counts, HEAD sha — or not run: why>
+SHAS: <your commit shas (7-40 hex), space-separated, or none; at most one trailing (note)>
+GATE: <the command, `N passed`/`N failed`/`N skipped` counts, HEAD sha — or `not run: why`; must contain a count, OK, FAIL or none>
 REVIEW: <N findings — C confirmed, R refuted | not run — why>
 DECISION: <none | question | (a) option; (b) option | recommended: (a) | class: reversible or one-way>
 ASSUMED: <choices you made that the user may want to override, or none>

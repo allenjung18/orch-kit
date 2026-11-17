@@ -508,8 +508,12 @@ def cmd_mark(st, a):
 
 # ---------------------------------------------------------------- report
 
+def strip_note(s):
+    return re.sub(r"\s*\([^()]*\)$", "", s)  # one trailing (note)
+
+
 def shas_ok(s):
-    s = re.sub(r"\s*\([^()]*\)$", "", s)  # one trailing (note)
+    s = strip_note(s)
     if s == "none":
         return True
     toks = [t for t in re.split(r"[ ,]+", s) if t]
@@ -517,7 +521,7 @@ def shas_ok(s):
 
 
 def gate_ok(g):
-    if re.search(r"\d+\s+(passed|pass|ran|tests?)\b|\d+/\d+", g):
+    if re.search(r"(?<![A-Za-z0-9_/])(\d+\s+(passed|pass|ran|tests?)\b|\d+/\d+(?![A-Za-z0-9_/]))", g):
         return True
     return bool(re.search(r"(?<![A-Za-z0-9_])(OK|FAIL(ED)?|none|not run)(?![A-Za-z0-9_])", g))
 
@@ -587,7 +591,7 @@ def cmd_report(st, a):
             st.save(run)
             st.log("report-miss %s attempt %d: %s" % (x["id"], x["attempt"], why))
             print("REPORT RESUME %s — %s" % (x["id"], why))
-            print("SEND: %s" % RESUME_PROMPT)
+            print("SEND: %s Fix: %s." % (RESUME_PROMPT, why))
             sys.exit(3)
         return give_up_or_requeue(st, run, x, "no report: %s" % why)
     x.update({"gate": fields["GATE"], "review": fields["REVIEW"],
@@ -600,7 +604,7 @@ def cmd_report(st, a):
             st.save(run)
             st.log("report %s DONE (read-only)" % x["id"])
             print("REPORT OK %s DONE — read-only, marked done" % x["id"])
-        elif fields["SHAS"] == "none" and nothing_to_land(st, x):
+        elif strip_note(fields["SHAS"]) == "none" and nothing_to_land(st, x):
             git(["worktree", "remove", "--force", x["worktree"]], st.root, check=False)
             git(["branch", "-D", x["branch"]], st.root, check=False)
             x.update({"status": "done", "worktree": "", "branch": "",

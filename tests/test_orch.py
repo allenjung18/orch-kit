@@ -251,6 +251,25 @@ class ReportTest(Repo):
         self.assertEqual(self.item("C-1")["status"], "done")
         self.assertFalse(os.path.exists(v["WORKTREE"]))
 
+    def test_shas_none_with_a_note_also_closes_without_landing(self):
+        self.ok("init")
+        self.ok("add", "--kind", "chunk", "--text", "one")
+        v = self.values(self.ok("prepare", "C-1"))
+        body = REPORT.format(id="C-1", result="DONE", branch=v["BRANCH"], decision="none",
+                             remaining="already done").replace("SHAS: abc1234", "SHAS: none (already on main)")
+        self.assertIn("nothing to land", self.report("C-1", text=body).stdout)
+        self.assertEqual(self.item("C-1")["status"], "done")
+
+    def test_a_bad_field_is_named_in_the_resume_prompt(self):
+        self.ok("init")
+        self.ok("add", "--kind", "chunk", "--text", "one")
+        self.ok("prepare", "C-1")
+        body = REPORT.format(id="C-1", result="DONE", branch="b", decision="none",
+                             remaining="none").replace("SHAS: abc1234", "SHAS: pushed")
+        r = self.report("C-1", text=body)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("SHAS", r.stdout.split("SEND:")[1])
+
     def test_shas_none_with_commits_on_the_branch_still_lands(self):
         self.ok("init")
         self.ok("add", "--kind", "chunk", "--text", "one")
@@ -300,6 +319,12 @@ class ReportTest(Repo):
             ("GATE FAIL", good.replace("3 passed, 0 failed", "FAIL typecheck"), 0),
             ("GATE none", good.replace("3 passed, 0 failed", "none"), 0),
             ("GATE not run", good.replace("3 passed, 0 failed", "not run: docs only"), 0),
+            ("SHAS none glued to a word", good.replace("SHAS: abc1234", "SHAS: nonesuch"), 3),
+            ("SHAS none then a sha", good.replace("SHAS: abc1234", "SHAS: none abc1234"), 3),
+            ("GATE lowercase ok", good.replace("3 passed, 0 failed", "ok"), 3),
+            ("GATE capitalised None", good.replace("3 passed, 0 failed", "None"), 3),
+            ("GATE digits glued to a word", good.replace("3 passed, 0 failed", "py3 test flaky"), 3),
+            ("GATE a path with digits", good.replace("3 passed, 0 failed", "logs/2026/11 fine"), 3),
             ("GATE prose", good.replace("3 passed, 0 failed", "looks fine"), 3),
             ("GATE OK inside a word", good.replace("3 passed, 0 failed", "TOOK"), 3),
             ("GATE OK followed by a word char", good.replace("3 passed, 0 failed", "OKAY"), 3),
