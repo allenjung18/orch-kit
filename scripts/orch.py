@@ -508,6 +508,20 @@ def cmd_mark(st, a):
 
 # ---------------------------------------------------------------- report
 
+def shas_ok(s):
+    s = re.sub(r"\s*\([^()]*\)$", "", s)  # one trailing (note)
+    if s == "none":
+        return True
+    toks = [t for t in re.split(r"[ ,]+", s) if t]
+    return bool(toks) and all(re.fullmatch(r"[0-9a-f]{7,40}", t) for t in toks)
+
+
+def gate_ok(g):
+    if re.search(r"\d+\s+(passed|pass|ran|tests?)\b|\d+/\d+", g):
+        return True
+    return bool(re.search(r"(?<![A-Za-z0-9_])(OK|FAIL(ED)?|none|not run)(?![A-Za-z0-9_])", g))
+
+
 def parse_report(text):
     lines = text.strip().splitlines()
     starts = [i for i, l in enumerate(lines) if l.startswith("CHUNK:")]
@@ -530,6 +544,10 @@ def parse_report(text):
         return None, "labels out of order"
     if fields["RESULT"] not in RESULTS:
         return None, "RESULT is %r, not one of %s" % (fields["RESULT"], "|".join(RESULTS))
+    if not shas_ok(fields["SHAS"]):
+        return None, "SHAS %r is not none or hex shas (7-40)" % fields["SHAS"]
+    if not gate_ok(fields["GATE"]):
+        return None, "GATE %r names no count, OK, FAIL or none" % fields["GATE"]
     return fields, ""
 
 

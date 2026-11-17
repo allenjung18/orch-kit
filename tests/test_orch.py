@@ -17,7 +17,7 @@ ORCH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 REPORT = """CHUNK: {id}
 RESULT: {result}
 BRANCH: {branch}
-SHAS: abc123
+SHAS: abc1234
 GATE: 3 passed, 0 failed
 REVIEW: 0 findings
 DECISION: {decision}
@@ -246,7 +246,7 @@ class ReportTest(Repo):
         self.ok("add", "--kind", "chunk", "--text", "one")
         v = self.values(self.ok("prepare", "C-1"))
         body = REPORT.format(id="C-1", result="DONE", branch=v["BRANCH"], decision="none",
-                             remaining="already done").replace("SHAS: abc123", "SHAS: none")
+                             remaining="already done").replace("SHAS: abc1234", "SHAS: none")
         self.assertIn("nothing to land", self.report("C-1", text=body).stdout)
         self.assertEqual(self.item("C-1")["status"], "done")
         self.assertFalse(os.path.exists(v["WORKTREE"]))
@@ -256,7 +256,7 @@ class ReportTest(Repo):
         self.ok("add", "--kind", "chunk", "--text", "one")
         v = self.build("C-1")
         body = REPORT.format(id="C-1", result="DONE", branch=v["BRANCH"], decision="none",
-                             remaining="none").replace("SHAS: abc123", "SHAS: none")
+                             remaining="none").replace("SHAS: abc1234", "SHAS: none")
         self.assertIn("now: orch.py land C-1", self.report("C-1", text=body).stdout)
         self.assertTrue(os.path.isdir(v["WORKTREE"]))
 
@@ -285,6 +285,26 @@ class ReportTest(Repo):
                                                  "REVIEW: 0 findings\nGATE: 3 passed, 0 failed\n"), 3),
             ("an unknown RESULT", good.replace("RESULT: DONE", "RESULT: MOSTLY"), 3),
             ("the wrong chunk id", good.replace("CHUNK: C-1", "CHUNK: C-9"), 3),
+            ("SHAS none with a note", good.replace("SHAS: abc1234", "SHAS: none (already on main)"), 0),
+            ("SHAS two shas, comma and space", good.replace("SHAS: abc1234", "SHAS: abc1234, 0123456789abcdef"), 0),
+            ("SHAS a 40-char sha with a note", good.replace("SHAS: abc1234", "SHAS: " + "a" * 40 + " (rebased)"), 0),
+            ("SHAS too short", good.replace("SHAS: abc1234", "SHAS: abc123"), 3),
+            ("SHAS too long", good.replace("SHAS: abc1234", "SHAS: " + "a" * 41), 3),
+            ("SHAS not hex", good.replace("SHAS: abc1234", "SHAS: abcdefg"), 3),
+            ("SHAS prose", good.replace("SHAS: abc1234", "SHAS: pushed to main"), 3),
+            ("SHAS two notes", good.replace("SHAS: abc1234", "SHAS: abc1234 (a) (b)"), 3),
+            ("SHAS empty", good.replace("SHAS: abc1234", "SHAS:"), 3),
+            ("GATE n/m", good.replace("3 passed, 0 failed", "12/12"), 0),
+            ("GATE ran", good.replace("3 passed, 0 failed", "ran 40 tests"), 0),
+            ("GATE OK", good.replace("3 passed, 0 failed", "OK abc1234"), 0),
+            ("GATE FAIL", good.replace("3 passed, 0 failed", "FAIL typecheck"), 0),
+            ("GATE none", good.replace("3 passed, 0 failed", "none"), 0),
+            ("GATE not run", good.replace("3 passed, 0 failed", "not run: docs only"), 0),
+            ("GATE prose", good.replace("3 passed, 0 failed", "looks fine"), 3),
+            ("GATE OK inside a word", good.replace("3 passed, 0 failed", "TOOK"), 3),
+            ("GATE OK followed by a word char", good.replace("3 passed, 0 failed", "OKAY"), 3),
+            ("GATE count word is a prefix", good.replace("3 passed, 0 failed", "3 testing"), 3),
+            ("GATE empty", good.replace("GATE: 3 passed, 0 failed", "GATE:"), 3),
         ]
         for name, text, code in cases:
             with self.subTest(name):

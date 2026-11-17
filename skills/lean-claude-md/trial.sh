@@ -21,7 +21,7 @@
 # probes.tsv, one probe per line, tab-separated, '#' lines skipped:
 #   name <TAB> prompt <TAB> expect <TAB> check (optional) <TAB> setup (optional)
 #   expect  plain English, judged against the transcript ("names the cost and
-#           offers /vorch"; "no plan: just does the rename")
+#           offers a cheaper route"; "no plan: just does the rename")
 #   check   shell run in the sandbox afterwards; exit 0 = pass (both must pass)
 #   setup   shell run in the sandbox before the prompt
 #
